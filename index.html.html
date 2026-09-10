@@ -1,0 +1,817 @@
+<div id="app"></div>
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<style>
+  :root{
+    --ink:#22303F;
+    --ink-soft:#5B6B78;
+    --paper:#F4F1E9;
+    --card:#FFFFFE;
+    --line:#DCD5C4;
+    --stamp-red:#B23A32;
+    --stamp-red-tint:#F6E4E1;
+    --ledger-green:#2E6B4F;
+    --ledger-green-tint:#E3EEE7;
+    --coin-amber:#B8842E;
+    --coin-amber-tint:#F3E7CE;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Helvetica Neue",sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #app{max-width:640px;margin:0 auto;padding-bottom:96px;}
+
+  .topbar{
+    position:sticky;top:0;z-index:5;
+    background:var(--paper);
+    border-bottom:1px solid var(--line);
+    padding:14px 16px 10px;
+  }
+  .topbar-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .brand{font-size:15px;letter-spacing:.02em;color:var(--ink-soft);}
+  .sync-badge{font-size:11px;color:var(--ink-soft);margin-top:2px;min-height:14px;}
+  .sync-badge.syncing{color:var(--coin-amber);}
+  .sync-badge.ok{color:var(--ledger-green);}
+  .sync-badge.error{color:var(--stamp-red);font-weight:700;}
+
+  .setup-wrap{padding:56px 24px;max-width:420px;margin:0 auto;}
+  .setup-wrap h2{font-size:19px;margin-bottom:6px;}
+  .setup-wrap .sub{color:var(--ink-soft);font-size:13px;line-height:1.7;margin-bottom:20px;}
+  .setup-label{display:block;font-size:12.5px;color:var(--ink-soft);margin:12px 0 4px;}
+  .setup-input{
+    width:100%;border:1px solid var(--line);background:var(--card);border-radius:9px;
+    padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);
+  }
+  .setup-hint{font-size:12px;color:var(--ink-soft);margin-top:14px;line-height:1.6;}
+  .date-nav{display:flex;align-items:center;gap:6px;}
+  .date-nav button{
+    width:34px;height:34px;border-radius:50%;border:1px solid var(--line);
+    background:var(--card);color:var(--ink);font-size:18px;line-height:1;
+  }
+  .date-nav input[type=date]{
+    border:1px solid var(--line);background:var(--card);color:var(--ink);
+    border-radius:10px;padding:7px 8px;font-size:15px;font-family:inherit;
+  }
+  .ghost-btn{
+    border:1px solid var(--line);background:transparent;color:var(--ink);
+    border-radius:10px;padding:8px 12px;font-size:13.5px;font-family:inherit;
+  }
+  .ghost-btn.small{padding:6px 10px;font-size:12.5px;color:var(--ink-soft);}
+
+  .summary-strip{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    gap:8px;padding:12px 16px 0;
+  }
+  .sum-item{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:8px 6px;text-align:center;
+  }
+  .sum-item .label{display:block;font-size:11.5px;color:var(--ink-soft);margin-bottom:2px;}
+  .sum-item .val{display:block;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .sum-item.paid .val{color:var(--ledger-green);}
+  .sum-item.unpaid .val{color:var(--stamp-red);}
+
+  .toolbar{padding:10px 16px 4px;display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;}
+
+  main{padding:10px 16px 20px;}
+
+  .empty-state{
+    text-align:center;color:var(--ink-soft);padding:40px 20px;
+    border:1px dashed var(--line);border-radius:14px;font-size:14px;line-height:1.7;
+  }
+
+  /* ---- 總覽格狀卡片（一眼看收款狀態）---- */
+  .stall-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(148px,1fr));
+    gap:10px;
+  }
+  .stall-tile{
+    background:var(--card);
+    border:1.5px solid var(--line);
+    border-radius:12px;
+    padding:11px 12px 10px;
+    text-align:left;
+  }
+  .stall-tile.is-paid{
+    background:var(--ledger-green-tint);
+    border-color:var(--ledger-green);
+  }
+  .stall-tile .tile-name{
+    font-weight:700;font-size:14.5px;margin-bottom:2px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .stall-tile .tile-detail{
+    font-size:11.5px;color:var(--ink-soft);min-height:15px;margin-bottom:8px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .stall-tile .tile-total{
+    font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;margin-bottom:8px;
+  }
+  .tile-pay-btn{
+    width:100%;border:none;border-radius:8px;padding:8px 0;
+    font-size:13px;font-weight:700;font-family:inherit;
+    background:var(--stamp-red-tint);color:var(--stamp-red);
+  }
+  .tile-pay-btn.is-paid{background:var(--ledger-green);color:#fff;}
+
+  /* ---- Modal 明細編輯 ---- */
+  .card-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .stall-name{
+    flex:1;border:none;background:transparent;font-size:18px;font-weight:700;
+    color:var(--ink);font-family:inherit;padding:2px 0;border-bottom:1px dashed var(--line);
+  }
+  .stall-name:focus{outline:none;}
+  .icon-btn{
+    border:none;background:transparent;color:var(--ink-soft);font-size:16px;
+    padding:4px 6px;
+  }
+
+  .section-label{font-size:12.5px;color:var(--ink-soft);margin:14px 0 6px;}
+
+  .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px;}
+  .chip{
+    display:inline-flex;align-items:center;gap:5px;
+    background:var(--coin-amber-tint);color:#7A5A1E;
+    border-radius:999px;padding:5px 6px 5px 11px;font-size:13px;font-variant-numeric:tabular-nums;
+  }
+  .chip.fixed{background:var(--paper);color:var(--ink-soft);}
+  .chip .x{
+    width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.08);
+    display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;
+    border:none;color:inherit;
+  }
+  .empty-chip-hint{font-size:12px;color:var(--ink-soft);margin:2px 0 8px;}
+
+  .add-row{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 2px;}
+  .add-row .preset{
+    border:1px solid var(--coin-amber);color:var(--coin-amber);background:transparent;
+    border-radius:999px;padding:6px 11px;font-size:12.5px;font-family:inherit;
+  }
+  .add-row .preset.appliance-preset{border-color:var(--ink-soft);color:var(--ink-soft);}
+  .appliance-form{display:flex;gap:6px;margin-top:8px;}
+  .appliance-form input{
+    border:1px solid var(--line);background:var(--paper);border-radius:8px;
+    padding:7px 8px;font-size:13px;font-family:inherit;color:var(--ink);
+  }
+  .appliance-form input.name{flex:1.4;min-width:0;}
+  .appliance-form input.price{flex:1;min-width:0;}
+  .appliance-form button{
+    border:1px solid var(--line);background:var(--card);border-radius:8px;
+    padding:7px 11px;font-size:13px;color:var(--ink);
+  }
+
+  .modal-total-row{
+    display:flex;align-items:center;justify-content:space-between;
+    margin-top:16px;padding-top:14px;border-top:1px dashed var(--line);
+  }
+  .modal-total-row .total{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .pay-toggle{
+    border:none;border-radius:999px;padding:9px 18px;font-size:13.5px;font-weight:700;
+    background:var(--stamp-red-tint);color:var(--stamp-red);
+  }
+  .pay-toggle.is-paid{background:var(--ledger-green);color:#fff;}
+
+  .modal-secondary-actions{display:flex;gap:8px;margin-top:14px;}
+  .modal-secondary-actions button{
+    flex:1;border:1px solid var(--line);background:transparent;color:var(--ink-soft);
+    border-radius:9px;padding:9px 0;font-size:13px;font-family:inherit;
+  }
+  .modal-secondary-actions button.danger{color:var(--stamp-red);border-color:var(--stamp-red-tint);}
+
+  .fab{
+    position:fixed;left:50%;transform:translateX(-50%);bottom:20px;
+    max-width:608px;width:calc(100% - 32px);
+    background:var(--ink);color:#fff;border:none;border-radius:14px;
+    padding:14px 0;font-size:15.5px;font-weight:700;font-family:inherit;
+    box-shadow:0 6px 18px rgba(0,0,0,.18);
+  }
+
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(20,20,18,.45);
+    display:flex;align-items:flex-end;justify-content:center;z-index:20;
+  }
+  .modal-overlay.hidden{display:none;}
+  .modal{
+    background:var(--card);width:100%;max-width:640px;
+    border-radius:18px 18px 0 0;padding:18px 18px 22px;
+    max-height:88vh;overflow-y:auto;
+  }
+  .modal h2{margin:0 0 4px;font-size:17px;}
+  .modal .sub{color:var(--ink-soft);font-size:12.5px;margin-bottom:14px;}
+  .receipt-paper{
+    background:#FBF0EF;border:1px dashed var(--stamp-red);border-radius:10px;
+    padding:16px;font-size:13.5px;line-height:1.9;color:var(--ink);
+  }
+  .receipt-paper .r-title{font-size:15px;font-weight:800;text-align:center;margin-bottom:8px;letter-spacing:.04em;}
+  .receipt-paper hr{border:none;border-top:1px dashed var(--stamp-red);margin:8px 0;}
+  .receipt-row{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;}
+  .receipt-total{font-weight:800;font-size:15.5px;}
+  .day-list-row{
+    display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);
+    font-size:13.5px;font-variant-numeric:tabular-nums;
+  }
+  .day-list-row .st{font-size:11.5px;padding:2px 7px;border-radius:999px;}
+  .day-list-row .st.paid{background:var(--ledger-green-tint);color:var(--ledger-green);}
+  .day-list-row .st.unpaid{background:var(--stamp-red-tint);color:var(--stamp-red);}
+
+  .modal-actions{display:flex;gap:8px;margin-top:16px;}
+  .modal-actions button{
+    flex:1;border-radius:10px;padding:11px 0;font-size:14px;font-family:inherit;border:1px solid var(--line);
+    background:var(--card);color:var(--ink);
+  }
+  .modal-actions button.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .modal-close{
+    display:block;margin:0 auto 10px;width:40px;height:4px;border-radius:99px;background:var(--line);border:none;
+  }
+  textarea.copy-fallback{
+    width:100%;margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:8px;
+    font-family:inherit;font-size:12.5px;color:var(--ink-soft);
+  }
+  .hidden{display:none;}
+
+  @media print{
+    body *{visibility:hidden;}
+    .modal, .modal *{visibility:visible;}
+    .modal-overlay{position:static;background:none;}
+    .modal{position:absolute;top:0;left:0;width:100%;max-height:none;border-radius:0;}
+    .modal-close, .modal-actions, .modal-secondary-actions, .add-row, .appliance-form, .chip .x, .stall-name{display:none;}
+  }
+</style>
+
+<script>
+(function(){
+  const BULB_PRESETS = [
+    {label:'小盞 100', price:100},
+    {label:'中盞 130', price:130},
+    {label:'大盞 150', price:150},
+  ];
+  const APPLIANCE_PRESETS = [
+    {label:'電風扇 +50', name:'電風扇', price:50},
+    {label:'其他電器 +100', name:'其他電器', price:100},
+  ];
+  const DEFAULT_CLEANING = 200;
+
+  let currentDate = todayStr();
+  let stalls = [];
+  let loaded = false;
+
+  const app = document.getElementById('app');
+  const modalOverlay = document.getElementById('modalOverlay');
+  const modalContent = document.getElementById('modalContent');
+
+  function todayStr(){
+    const d = new Date();
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+  }
+  function shiftDate(dateStr, delta){
+    const d = new Date(dateStr+'T00:00:00');
+    d.setDate(d.getDate()+delta);
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+  }
+  function fmtDate(dateStr){
+    const d = new Date(dateStr+'T00:00:00');
+    const wd = ['日','一','二','三','四','五','六'][d.getDay()];
+    return `${d.getMonth()+1}月${d.getDate()}日（週${wd}）`;
+  }
+  function uid(){ return 's'+Math.random().toString(36).slice(2,9); }
+  function money(n){ return '$'+Math.round(n).toLocaleString('en-US'); }
+  function escapeHtml(str){
+    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function stallTotal(s){
+    const bulbSum = s.bulbs.reduce((a,b)=>a+b,0);
+    const applSum = s.appliances.reduce((a,b)=>a+b.price,0);
+    return (s.cleaning||0) + bulbSum + applSum;
+  }
+  function stallDetailLine(s){
+    const parts = [];
+    if(s.bulbs.length) parts.push('燈×'+s.bulbs.length);
+    s.appliances.forEach(a=> parts.push(a.name));
+    return parts.join('、');
+  }
+
+  const CFG_URL_KEY = 'stallFees:gasUrl';
+  const CFG_TOKEN_KEY = 'stallFees:gasKey';
+  const CFG_SHEET_KEY = 'stallFees:sheetUrl';
+
+  function getConfig(){
+    return {
+      url: localStorage.getItem(CFG_URL_KEY) || '',
+      key: localStorage.getItem(CFG_TOKEN_KEY) || '',
+      sheetUrl: localStorage.getItem(CFG_SHEET_KEY) || '',
+    };
+  }
+  function setConfig(url, key, sheetUrl){
+    localStorage.setItem(CFG_URL_KEY, url.trim());
+    localStorage.setItem(CFG_TOKEN_KEY, key.trim());
+    localStorage.setItem(CFG_SHEET_KEY, (sheetUrl||'').trim());
+  }
+  function isConfigured(){
+    const c = getConfig();
+    return !!(c.url && c.key);
+  }
+
+  let syncStatus = 'idle'; // idle | syncing | ok | error
+  let saveTimer = null;
+
+  function setSyncStatus(s){ syncStatus = s; updateSyncBadge(); }
+  function updateSyncBadge(){
+    const el = document.getElementById('syncBadge');
+    if(!el) return;
+    const map = {
+      idle: ['', ''],
+      syncing: ['同步中…', 'syncing'],
+      ok: ['已同步雲端', 'ok'],
+      error: ['同步失敗，稍後重試', 'error'],
+    };
+    const [label, cls] = map[syncStatus] || ['',''];
+    el.textContent = label;
+    el.className = 'sync-badge ' + cls;
+  }
+
+ async function gasFetch(params, options = {}) {
+    const c = getConfig();
+    const url = new URL(c.url);
+    Object.keys(params || {}).forEach(k => url.searchParams.set(k, params[k]));
+    url.searchParams.set('key', c.key);
+    
+    // 加上 redirect: 'follow' 確保 iOS 能夠正常跟隨 GAS 的 302 轉向
+    const res = await fetch(url.toString(), {
+      ...options,
+      redirect: 'follow'
+    });
+    if (!res.ok) throw new Error('network error ' + res.status);
+    const json = await res.json();
+    if (json && json.error) throw new Error(json.error);
+    return json;
+  }
+
+  async function loadDay(dateStr){
+    loaded = false;
+    setSyncStatus('syncing');
+    try{
+      const json = await gasFetch({action:'get', date:dateStr}, {method:'GET'});
+      stalls = Array.isArray(json.stalls) ? json.stalls : [];
+      setSyncStatus('ok');
+    }catch(e){
+      console.error('讀取失敗', e);
+      stalls = [];
+      setSyncStatus('error');
+      alert('無法從雲端讀取資料，請確認網路連線與雲端設定是否正確。');
+    }
+    loaded = true;
+    render();
+  }
+
+  function saveDay(){
+    // 防止連續操作（例如連按好幾次加燈）觸發太多次網路請求，統一延遲後合併送出
+    clearTimeout(saveTimer);
+    setSyncStatus('syncing');
+    saveTimer = setTimeout(doSaveDay, 500);
+  }
+  async function doSaveDay() {
+    const c = getConfig();
+    const dateAtSave = currentDate;
+    const payload = JSON.stringify(stalls);
+    try {
+      const url = new URL(c.url);
+      url.searchParams.set('key', c.key);
+
+      // 改用 URLSearchParams POST，並加上 redirect: 'follow' 解決 iOS Safari CORS 限制
+      const bodyParams = new URLSearchParams();
+      bodyParams.append('data', JSON.stringify({ action: 'set', date: dateAtSave, stalls: JSON.parse(payload) }));
+
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: bodyParams,
+        redirect: 'follow'
+      });
+      const json = await res.json();
+      if (!res.ok || (json && json.error)) throw new Error((json && json.error) || 'save failed');
+      setSyncStatus('ok');
+    } catch (e) {
+      console.error('儲存失敗', e);
+      setSyncStatus('error');
+    }
+  }
+
+  async function fetchDayRaw(dateStr){
+    try{
+      const json = await gasFetch({action:'get', date:dateStr}, {method:'GET'});
+      return Array.isArray(json.stalls) ? json.stalls : [];
+    }catch(e){
+      return null;
+    }
+  }
+
+  function addStall(){
+    const s = {
+      id: uid(),
+      name: '攤位 '+(stalls.length+1),
+      cleaning: DEFAULT_CLEANING,
+      bulbs: [],
+      appliances: [],
+      paid: false,
+    };
+    stalls.push(s);
+    saveDay(); render();
+    openStallEditor(s.id); // 新增後直接打開明細，方便馬上設定燈數
+  }
+  function deleteStall(id){
+    if(!confirm('刪除這一攤的紀錄？')) return;
+    stalls = stalls.filter(s=>s.id!==id);
+    saveDay(); render(); closeModal();
+  }
+  function togglePaid(id){
+    const s = stalls.find(x=>x.id===id);
+    if(s){ s.paid = !s.paid; saveDay(); render(); }
+  }
+  function addBulb(id, price){
+    const s = stalls.find(x=>x.id===id);
+    if(s){ s.bulbs.push(price); saveDay(); }
+  }
+  function removeBulb(id, idx){
+    const s = stalls.find(x=>x.id===id);
+    if(s){ s.bulbs.splice(idx,1); saveDay(); }
+  }
+  function addAppliance(id, name, price){
+    const s = stalls.find(x=>x.id===id);
+    if(s && name && !isNaN(price) && price>0){ s.appliances.push({name,price}); saveDay(); }
+  }
+  function removeAppliance(id, idx){
+    const s = stalls.find(x=>x.id===id);
+    if(s){ s.appliances.splice(idx,1); saveDay(); }
+  }
+  function renameStall(id, name){
+    const s = stalls.find(x=>x.id===id);
+    if(s){ s.name = name || s.name; saveDay(); render(); }
+  }
+
+  async function copyFromPreviousDay(){
+    const prev = shiftDate(currentDate, -1);
+    const prevStalls = await fetchDayRaw(prev);
+    if(!prevStalls || prevStalls.length===0){
+      alert('前一天（'+prev+'）沒有紀錄可複製，或目前連不上雲端。');
+      return;
+    }
+    if(stalls.length>0 && !confirm('今天已有紀錄，要在後面加上昨天的攤位名單嗎？')) return;
+    const copied = prevStalls.map(s=>({
+      id: uid(), name: s.name, cleaning: s.cleaning,
+      bulbs: [...s.bulbs], appliances: s.appliances.map(a=>({...a})), paid:false
+    }));
+    stalls = stalls.concat(copied);
+    saveDay(); render();
+  }
+
+  // ---------- 額外備份（資料主要存在 Google 試算表，這裡只是方便你另存一份當天快照）----------
+  function exportBackup(){
+    if(stalls.length===0){
+      alert('今天沒有紀錄可以匯出。');
+      return;
+    }
+    const blob = new Blob([JSON.stringify({date:currentDate, stalls}, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '攤位記帳_'+currentDate+'.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- 設定畫面：Google Apps Script 網址與金鑰 ----------
+  function renderSetupScreen(){
+    app.innerHTML = `
+      <div class="setup-wrap">
+        <h2>先連接你的 Google 試算表</h2>
+        <p class="sub">資料會存在你自己的 Google 試算表裡，所有裝置打開都是同一份。第一次設定完成後，之後不用再輸入。</p>
+        <label class="setup-label">Google Apps Script 網址</label>
+        <input id="setupUrl" class="setup-input" placeholder="https://script.google.com/macros/s/…/exec">
+        <label class="setup-label">金鑰（部署程式碼裡設定的 SECRET）</label>
+        <input id="setupKey" class="setup-input" placeholder="例如：abc123">
+        <label class="setup-label">試算表網址（選填，方便之後直接打開查看）</label>
+        <input id="setupSheet" class="setup-input" placeholder="https://docs.google.com/spreadsheets/…">
+        <button class="fab" id="btnSaveSetup" style="position:static;width:100%;margin-top:16px;">儲存並開始使用</button>
+        <p class="setup-hint">還沒建立 Google 試算表後端嗎？跟建立這個工具的 Claude 對話要設定教學和程式碼即可。</p>
+      </div>
+    `;
+    document.getElementById('btnSaveSetup').onclick = ()=>{
+      const url = document.getElementById('setupUrl').value.trim();
+      const key = document.getElementById('setupKey').value.trim();
+      const sheetUrl = document.getElementById('setupSheet').value.trim();
+      if(!url || !key){ alert('請至少填寫網址和金鑰。'); return; }
+      setConfig(url, key, sheetUrl);
+      loadDay(currentDate);
+    };
+  }
+
+  function openSettingsModal(){
+    const c = getConfig();
+    openModal(`
+      <h2>雲端連線設定</h2>
+      <label class="setup-label">Google Apps Script 網址</label>
+      <input id="setupUrl" class="setup-input" value="${escapeHtml(c.url)}">
+      <label class="setup-label">金鑰</label>
+      <input id="setupKey" class="setup-input" value="${escapeHtml(c.key)}">
+      <label class="setup-label">試算表網址（選填）</label>
+      <input id="setupSheet" class="setup-input" value="${escapeHtml(c.sheetUrl)}">
+      <div class="modal-actions">
+        ${c.sheetUrl ? `<button data-action="openSheet">開啟試算表</button>` : ''}
+        <button class="primary" data-action="saveSettings">儲存</button>
+      </div>
+    `);
+    if(c.sheetUrl){
+      modalContent.querySelector('[data-action="openSheet"]').onclick = ()=> window.open(c.sheetUrl, '_blank');
+    }
+    modalContent.querySelector('[data-action="saveSettings"]').onclick = ()=>{
+      const url = document.getElementById('setupUrl').value.trim();
+      const key = document.getElementById('setupKey').value.trim();
+      const sheetUrl = document.getElementById('setupSheet').value.trim();
+      if(!url || !key){ alert('請至少填寫網址和金鑰。'); return; }
+      setConfig(url, key, sheetUrl);
+      closeModal();
+      loadDay(currentDate);
+    };
+  }
+
+  // ---------- 總覽畫面 ----------
+  function render(){
+    if(!isConfigured()){ renderSetupScreen(); return; }
+    if(!loaded) return;
+    const total = stalls.reduce((a,s)=>a+stallTotal(s),0);
+    const paidTotal = stalls.filter(s=>s.paid).reduce((a,s)=>a+stallTotal(s),0);
+    const unpaidTotal = total - paidTotal;
+
+    app.innerHTML = `
+      <div class="topbar">
+        <div class="topbar-row">
+          <div>
+            <div class="brand">攤位清潔費・電費收款</div>
+            <div class="sync-badge" id="syncBadge"></div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="icon-btn" id="btnSettings">⚙︎</button>
+            <button class="ghost-btn" id="btnDaySummary">本日總表</button>
+          </div>
+        </div>
+        <div class="topbar-row" style="margin-top:10px;">
+          <div class="date-nav">
+            <button id="btnPrevDay">‹</button>
+            <input type="date" id="dateInput" value="${currentDate}">
+            <button id="btnNextDay">›</button>
+          </div>
+          <span style="font-size:12.5px;color:var(--ink-soft);">${fmtDate(currentDate)}</span>
+        </div>
+      </div>
+
+      <div class="summary-strip">
+        <div class="sum-item"><span class="label">攤位數</span><span class="val">${stalls.length}</span></div>
+        <div class="sum-item"><span class="label">應收</span><span class="val">${money(total)}</span></div>
+        <div class="sum-item paid"><span class="label">已收</span><span class="val">${money(paidTotal)}</span></div>
+        <div class="sum-item unpaid"><span class="label">未收</span><span class="val">${money(unpaidTotal)}</span></div>
+      </div>
+
+      <div class="toolbar">
+        <button class="ghost-btn small" id="btnExport">匯出今日快照</button>
+        <button class="ghost-btn small" id="btnCopyPrev">複製前一天名單</button>
+      </div>
+
+      <main>
+        ${stalls.length===0
+          ? `<div class="empty-state">今天還沒有攤位紀錄<br>點下方「新增攤位」開始記帳</div>`
+          : `<div class="stall-grid">${stalls.map(tileHTML).join('')}</div>`}
+      </main>
+      <button class="fab" id="btnAddStall">＋ 新增攤位</button>
+    `;
+    updateSyncBadge();
+    bindListEvents();
+  }
+
+  function tileHTML(s){
+    const t = stallTotal(s);
+    const detail = stallDetailLine(s);
+    return `
+    <div class="stall-tile ${s.paid?'is-paid':''}" data-action="openStall" data-id="${s.id}">
+      <div class="tile-name">${escapeHtml(s.name)}</div>
+      <div class="tile-detail">${detail || '尚未加燈/電器'}</div>
+      <div class="tile-total">${money(t)}</div>
+      <button class="tile-pay-btn ${s.paid?'is-paid':''}" data-action="quickPaid" data-id="${s.id}">${s.paid?'✓ 已收':'點擊收錢'}</button>
+    </div>`;
+  }
+
+  function bindListEvents(){
+    document.getElementById('btnPrevDay').onclick = ()=>{ currentDate = shiftDate(currentDate,-1); loaded=false; loadDay(currentDate); };
+    document.getElementById('btnNextDay').onclick = ()=>{ currentDate = shiftDate(currentDate,1); loaded=false; loadDay(currentDate); };
+    document.getElementById('dateInput').onchange = (e)=>{ currentDate = e.target.value; loaded=false; loadDay(currentDate); };
+    document.getElementById('btnAddStall').onclick = addStall;
+    document.getElementById('btnCopyPrev').onclick = copyFromPreviousDay;
+    document.getElementById('btnDaySummary').onclick = openDaySummary;
+    document.getElementById('btnExport').onclick = exportBackup;
+    document.getElementById('btnSettings').onclick = openSettingsModal;
+
+    document.querySelectorAll('[data-action="openStall"]').forEach(el=>{
+      el.onclick = ()=> openStallEditor(el.dataset.id);
+    });
+    document.querySelectorAll('[data-action="quickPaid"]').forEach(el=>{
+      el.onclick = (e)=>{ e.stopPropagation(); togglePaid(el.dataset.id); };
+    });
+  }
+
+  // ---------- Modal：單攤明細編輯 ----------
+  function openModal(html){
+    modalContent.innerHTML = `<button class="modal-close" data-action="closeModal"></button>` + html;
+    modalOverlay.classList.remove('hidden');
+    modalOverlay.querySelectorAll('[data-action="closeModal"]').forEach(el=> el.onclick = closeModal);
+  }
+  function closeModal(){ modalOverlay.classList.add('hidden'); }
+  modalOverlay.addEventListener('click', (e)=>{ if(e.target===modalOverlay) closeModal(); });
+
+  function openStallEditor(id){
+    renderStallEditor(id);
+  }
+
+  function renderStallEditor(id){
+    const s = stalls.find(x=>x.id===id);
+    if(!s) return;
+    openModal(editorHTML(s));
+    bindEditorEvents(s);
+  }
+
+  function editorHTML(s){
+    return `
+      <div class="card-head">
+        <input class="stall-name" value="${escapeHtml(s.name)}" id="editName">
+        <button class="icon-btn" data-action="receipt">🧾</button>
+      </div>
+
+      <div class="section-label">費用項目</div>
+      <div class="chip-row">
+        <span class="chip fixed">清潔費 ${money(s.cleaning)}</span>
+        ${s.bulbs.map((b,i)=>`<span class="chip">燈 ${money(b)}<button class="x" data-action="rmbulb" data-idx="${i}">✕</button></span>`).join('')}
+        ${s.appliances.map((a,i)=>`<span class="chip">${escapeHtml(a.name)} ${money(a.price)}<button class="x" data-action="rmappl" data-idx="${i}">✕</button></span>`).join('')}
+      </div>
+
+      <div class="section-label">加燈（可重複點，點幾次加幾顆）</div>
+      <div class="add-row">
+        ${BULB_PRESETS.map(p=>`<button class="preset" data-action="addbulb" data-price="${p.price}">+ ${p.label}</button>`).join('')}
+      </div>
+
+      <div class="section-label">加電器</div>
+      <div class="add-row">
+        ${APPLIANCE_PRESETS.map(p=>`<button class="preset appliance-preset" data-action="addappl-preset" data-name="${p.name}" data-price="${p.price}">+ ${p.label}</button>`).join('')}
+      </div>
+      <div class="appliance-form">
+        <input class="name" placeholder="自訂電器名稱" id="apname">
+        <input class="price" type="number" inputmode="numeric" placeholder="金額" id="apprice">
+        <button data-action="addappl-custom">新增</button>
+      </div>
+
+      <div class="modal-total-row">
+        <div>
+          <div style="font-size:12px;color:var(--ink-soft);">本攤應收</div>
+          <div class="total">${money(stallTotal(s))}</div>
+        </div>
+        <button class="pay-toggle ${s.paid?'is-paid':''}" data-action="paid">${s.paid?'✓ 已收（點擊改回未收）':'點擊收錢'}</button>
+      </div>
+
+      <div class="modal-secondary-actions">
+        <button data-action="closeModal">完成，回總覽</button>
+        <button class="danger" data-action="delete">刪除這攤</button>
+      </div>
+    `;
+  }
+
+  function bindEditorEvents(s){
+    const id = s.id;
+    modalContent.querySelector('#editName').onchange = (e)=> renameStall(id, e.target.value.trim());
+    modalContent.querySelector('[data-action="delete"]').onclick = ()=> deleteStall(id);
+    modalContent.querySelector('[data-action="paid"]').onclick = ()=>{ togglePaid(id); renderStallEditor(id); };
+    modalContent.querySelector('[data-action="receipt"]').onclick = ()=> openStallReceipt(id);
+
+    modalContent.querySelectorAll('[data-action="addbulb"]').forEach(el=>{
+      el.onclick = ()=>{ addBulb(id, Number(el.dataset.price)); render(); renderStallEditor(id); };
+    });
+    modalContent.querySelectorAll('[data-action="rmbulb"]').forEach(el=>{
+      el.onclick = ()=>{ removeBulb(id, Number(el.dataset.idx)); render(); renderStallEditor(id); };
+    });
+    modalContent.querySelectorAll('[data-action="rmappl"]').forEach(el=>{
+      el.onclick = ()=>{ removeAppliance(id, Number(el.dataset.idx)); render(); renderStallEditor(id); };
+    });
+    modalContent.querySelectorAll('[data-action="addappl-preset"]').forEach(el=>{
+      el.onclick = ()=>{ addAppliance(id, el.dataset.name, Number(el.dataset.price)); render(); renderStallEditor(id); };
+    });
+    modalContent.querySelector('[data-action="addappl-custom"]').onclick = ()=>{
+      const nameEl = modalContent.querySelector('#apname');
+      const priceEl = modalContent.querySelector('#apprice');
+      addAppliance(id, nameEl.value.trim(), Number(priceEl.value));
+      render(); renderStallEditor(id);
+    };
+  }
+
+  // ---------- 收據 ----------
+  function stallReceiptText(s){
+    const lines = [];
+    lines.push('收據');
+    lines.push('日期：'+currentDate+'（'+fmtDate(currentDate)+'）');
+    lines.push('攤位：'+s.name);
+    lines.push('--------------------------');
+    lines.push('清潔費：'+money(s.cleaning));
+    s.bulbs.forEach((b,i)=> lines.push('電費（燈 '+(i+1)+'）：'+money(b)));
+    s.appliances.forEach(a=> lines.push(a.name+'：'+money(a.price)));
+    lines.push('--------------------------');
+    lines.push('總計：'+money(stallTotal(s)));
+    lines.push('狀態：'+(s.paid?'已收':'未收'));
+    return lines.join('\n');
+  }
+
+  function openStallReceipt(id){
+    const s = stalls.find(x=>x.id===id);
+    if(!s) return;
+    const bulbRows = s.bulbs.map((b,i)=>`<div class="receipt-row"><span>電費（燈 ${i+1}）</span><span>${money(b)}</span></div>`).join('');
+    const applRows = s.appliances.map(a=>`<div class="receipt-row"><span>${escapeHtml(a.name)}</span><span>${money(a.price)}</span></div>`).join('');
+    openModal(`
+      <h2>${escapeHtml(s.name)} 的收據</h2>
+      <div class="sub">${currentDate}（${fmtDate(currentDate)}）</div>
+      <div class="receipt-paper">
+        <div class="r-title">收　據</div>
+        <div class="receipt-row"><span>攤位</span><span>${escapeHtml(s.name)}</span></div>
+        <div class="receipt-row"><span>日期</span><span>${currentDate}</span></div>
+        <hr>
+        <div class="receipt-row"><span>清潔費</span><span>${money(s.cleaning)}</span></div>
+        ${bulbRows}
+        ${applRows}
+        <hr>
+        <div class="receipt-row receipt-total"><span>總計</span><span>${money(stallTotal(s))}</span></div>
+        <div class="receipt-row"><span>狀態</span><span>${s.paid?'已收':'未收'}</span></div>
+      </div>
+      <div class="modal-actions">
+        <button data-action="back">回明細</button>
+        <button data-action="copyReceipt">複製文字</button>
+        <button class="primary" data-action="printReceipt">列印</button>
+      </div>
+      <textarea class="copy-fallback hidden" rows="8" readonly></textarea>
+    `);
+    modalContent.querySelector('[data-action="back"]').onclick = ()=> renderStallEditor(id);
+    modalContent.querySelector('[data-action="printReceipt"]').onclick = ()=> window.print();
+    modalContent.querySelector('[data-action="copyReceipt"]').onclick = async ()=>{
+      const text = stallReceiptText(s);
+      try{
+        await navigator.clipboard.writeText(text);
+        alert('已複製收據文字');
+      }catch(e){
+        const ta = modalContent.querySelector('textarea.copy-fallback');
+        ta.value = text;
+        ta.classList.remove('hidden');
+        ta.select();
+      }
+    };
+  }
+
+  function openDaySummary(){
+    const total = stalls.reduce((a,s)=>a+stallTotal(s),0);
+    const paidTotal = stalls.filter(s=>s.paid).reduce((a,s)=>a+stallTotal(s),0);
+    const unpaidTotal = total - paidTotal;
+    const rows = stalls.map(s=>`
+      <div class="day-list-row">
+        <span>${escapeHtml(s.name)}</span>
+        <span>${money(stallTotal(s))}</span>
+        <span class="st ${s.paid?'paid':'unpaid'}">${s.paid?'已收':'未收'}</span>
+      </div>`).join('') || `<div class="empty-state">今天沒有攤位紀錄</div>`;
+
+    openModal(`
+      <h2>本日總表</h2>
+      <div class="sub">${currentDate}（${fmtDate(currentDate)}）・共 ${stalls.length} 攤</div>
+      <div class="receipt-paper">
+        <div class="r-title">本　日　總　表</div>
+        ${rows}
+        <hr>
+        <div class="receipt-row"><span>應收合計</span><span>${money(total)}</span></div>
+        <div class="receipt-row"><span>已收合計</span><span>${money(paidTotal)}</span></div>
+        <div class="receipt-row receipt-total"><span>未收合計</span><span>${money(unpaidTotal)}</span></div>
+      </div>
+      <div class="modal-actions">
+        <button class="primary" data-action="printDay">列印</button>
+      </div>
+    `);
+    modalContent.querySelector('[data-action="printDay"]').onclick = ()=> window.print();
+  }
+
+  if(isConfigured()){
+    loadDay(currentDate);
+  }else{
+    renderSetupScreen();
+  }
+})();
+</script>
