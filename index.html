@@ -170,7 +170,7 @@
   }
   .modal-total-row .total{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;}
   .pay-toggle{
-    border:none;border-radius:999px;padding:99px 18px;font-size:13.5px;font-weight:700;
+    border:none;border-radius:999px;padding:9px 18px;font-size:13.5px;font-weight:700;
     background:var(--stamp-red-tint);color:var(--stamp-red);
   }
   .pay-toggle.is-paid{background:var(--ledger-green);color:#fff;}
@@ -313,6 +313,7 @@
 
   let syncStatus = 'idle';
   let saveTimer = null;
+  let pendingSnapshot = null;
 
   function setSyncStatus(s){ syncStatus = s; updateSyncBadge(); }
   function updateSyncBadge(){
@@ -366,13 +367,24 @@
   function saveDay(){
     clearTimeout(saveTimer);
     setSyncStatus('syncing');
-    saveTimer = setTimeout(doSaveDay, 500);
+    // 立刻把「現在是哪一天、現在的資料長怎樣」拍照存起來，
+    // 不要等0.5秒後才去讀 currentDate / stalls —— 
+    // 因為那時候如果使用者已經切換到別天，讀到的會是錯的日期或錯的資料。
+    pendingSnapshot = { date: currentDate, stalls: JSON.parse(JSON.stringify(stalls)), isClosed: isClosed };
+    saveTimer = setTimeout(flushPendingSave, 500);
   }
 
-  async function doSaveDay() {
+  async function flushPendingSave(){
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if(!pendingSnapshot) return;
+    const snap = pendingSnapshot;
+    pendingSnapshot = null;
+    await doSaveDay(snap.date, snap.stalls, snap.isClosed);
+  }
+
+  async function doSaveDay(dateAtSave, stallsSnapshot, isClosedSnapshot) {
     const c = getConfig();
-    const dateAtSave = currentDate;
-    const payload = JSON.stringify(stalls);
     try {
       const url = new URL(c.url);
       url.searchParams.set('key', c.key);
@@ -381,8 +393,8 @@
       bodyParams.append('data', JSON.stringify({
         action: 'set',
         date: dateAtSave,
-        stalls: JSON.parse(payload),
-        isClosed: isClosed
+        stalls: stallsSnapshot,
+        isClosed: isClosedSnapshot
       }));
 
       const res = await fetch(url.toString(), {
@@ -398,6 +410,15 @@
       console.error('儲存失敗', e);
       setSyncStatus('error');
     }
+  }
+
+  // 切換到別的日期之前，一定要先把還沒送出的儲存「立刻補送」完成，
+  // 才能保證舊那天的最後一筆修改真的有存到，再去讀新的那天。
+  async function switchToDate(newDate){
+    await flushPendingSave();
+    currentDate = newDate;
+    loaded = false;
+    loadDay(currentDate);
   }
 
   function toggleCloseDay(){
@@ -619,9 +640,9 @@
   }
 
   function bindListEvents(){
-    document.getElementById('btnPrevDay').onclick = ()=>{ currentDate = shiftDate(currentDate,-1); loaded=false; loadDay(currentDate); };
-    document.getElementById('btnNextDay').onclick = ()=>{ currentDate = shiftDate(currentDate,1); loaded=false; loadDay(currentDate); };
-    document.getElementById('dateInput').onchange = (e)=>{ currentDate = e.target.value; loaded=false; loadDay(currentDate); };
+    document.getElementById('btnPrevDay').onclick = ()=> switchToDate(shiftDate(currentDate,-1));
+    document.getElementById('btnNextDay').onclick = ()=> switchToDate(shiftDate(currentDate,1));
+    document.getElementById('dateInput').onchange = (e)=> switchToDate(e.target.value);
     document.getElementById('btnAddStall').onclick = addStall;
     document.getElementById('btnCopyPrev').onclick = copyFromPreviousDay;
     document.getElementById('btnDaySummary').onclick = openDaySummary;
