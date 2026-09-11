@@ -49,11 +49,13 @@
     padding:10px 12px;font-size:14px;font-family:inherit;color:var(--ink);
   }
   .setup-hint{font-size:12px;color:var(--ink-soft);margin-top:14px;line-height:1.6;}
+
   .date-nav{display:flex;align-items:center;gap:6px;}
   .date-nav button{
     width:34px;height:34px;border-radius:50%;border:1px solid var(--line);
     background:var(--card);color:var(--ink);font-size:18px;line-height:1;
   }
+  .date-nav button:disabled{opacity:.35;}
   .date-nav input[type=date]{
     border:1px solid var(--line);background:var(--card);color:var(--ink);
     border-radius:10px;padding:7px 8px;font-size:15px;font-family:inherit;
@@ -78,6 +80,7 @@
   .sum-item.unpaid .val{color:var(--stamp-red);}
 
   .toolbar{padding:10px 16px 4px;display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;align-items:center;}
+  .toolbar .group{display:flex;flex-wrap:wrap;gap:6px;}
 
   main{padding:10px 16px 20px;}
 
@@ -211,10 +214,10 @@
   .receipt-row{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;}
   .receipt-total{font-weight:800;font-size:15.5px;}
   .day-list-row{
-    display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);
-    font-size:13.5px;font-variant-numeric:tabular-nums;
+    display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);
+    font-size:13px;font-variant-numeric:tabular-nums;
   }
-  .day-list-row .st{font-size:11.5px;padding:2px 7px;border-radius:999px;}
+  .day-list-row .st{font-size:11px;padding:2px 7px;border-radius:999px;white-space:nowrap;}
   .day-list-row .st.paid{background:var(--ledger-green-tint);color:var(--ledger-green);}
   .day-list-row .st.unpaid{background:var(--stamp-red-tint);color:var(--stamp-red);}
 
@@ -232,6 +235,14 @@
     font-family:inherit;font-size:12.5px;color:var(--ink-soft);
   }
   .hidden{display:none;}
+
+  @media print{
+    body *{visibility:hidden;}
+    .modal, .modal *{visibility:visible;}
+    .modal-overlay{position:static;background:none;}
+    .modal{position:absolute;top:0;left:0;width:100%;max-height:none;border-radius:0;}
+    .modal-close, .modal-actions, .modal-secondary-actions, .add-row, .appliance-form, .chip .x, .stall-name{display:none;}
+  }
 </style>
 
 <script>
@@ -290,6 +301,7 @@
     return parts.join('、');
   }
 
+  // ---------- 雲端連線設定 ----------
   const CFG_URL_KEY = 'stallFees:gasUrl';
   const CFG_TOKEN_KEY = 'stallFees:gasKey';
   const CFG_SHEET_KEY = 'stallFees:sheetUrl';
@@ -311,6 +323,7 @@
     return !!(c.url && c.key);
   }
 
+  // ---------- 同步狀態 ----------
   let syncStatus = 'idle';
   let saveTimer = null;
   let pendingSnapshot = null;
@@ -330,19 +343,15 @@
     el.className = 'sync-badge ' + cls;
   }
 
-  async function gasFetch(params, options = {}) {
+  async function gasFetch(params, options){
     const c = getConfig();
     const url = new URL(c.url);
-    Object.keys(params || {}).forEach(k => url.searchParams.set(k, params[k]));
+    Object.keys(params||{}).forEach(k=> url.searchParams.set(k, params[k]));
     url.searchParams.set('key', c.key);
-
-    const res = await fetch(url.toString(), {
-      ...options,
-      redirect: 'follow'
-    });
-    if (!res.ok) throw new Error('network error ' + res.status);
+    const res = await fetch(url.toString(), Object.assign({redirect:'follow'}, options||{}));
+    if(!res.ok) throw new Error('network error '+res.status);
     const json = await res.json();
-    if (json && json.error) throw new Error(json.error);
+    if(json && json.error) throw new Error(json.error);
     return json;
   }
 
@@ -359,6 +368,7 @@
       stalls = [];
       isClosed = false;
       setSyncStatus('error');
+      alert('無法從雲端讀取資料，請確認網路連線與雲端設定是否正確。');
     }
     loaded = true;
     render();
@@ -367,9 +377,7 @@
   function saveDay(){
     clearTimeout(saveTimer);
     setSyncStatus('syncing');
-    // 立刻把「現在是哪一天、現在的資料長怎樣」拍照存起來，
-    // 不要等0.5秒後才去讀 currentDate / stalls —— 
-    // 因為那時候如果使用者已經切換到別天，讀到的會是錯的日期或錯的資料。
+    // 立刻拍照記錄「現在是哪天、現在資料長怎樣」，避免延遲送出時已經換頁造成錯亂
     pendingSnapshot = { date: currentDate, stalls: JSON.parse(JSON.stringify(stalls)), isClosed: isClosed };
     saveTimer = setTimeout(flushPendingSave, 500);
   }
@@ -383,70 +391,65 @@
     await doSaveDay(snap.date, snap.stalls, snap.isClosed);
   }
 
-  async function doSaveDay(dateAtSave, stallsSnapshot, isClosedSnapshot) {
+  async function doSaveDay(dateAtSave, stallsSnapshot, isClosedSnapshot){
     const c = getConfig();
-    try {
+    try{
       const url = new URL(c.url);
       url.searchParams.set('key', c.key);
-
       const bodyParams = new URLSearchParams();
       bodyParams.append('data', JSON.stringify({
-        action: 'set',
-        date: dateAtSave,
-        stalls: stallsSnapshot,
-        isClosed: isClosedSnapshot
+        action:'set', date:dateAtSave, stalls:stallsSnapshot, isClosed:isClosedSnapshot
       }));
-
       const res = await fetch(url.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
         body: bodyParams,
-        redirect: 'follow'
+        redirect:'follow'
       });
       const json = await res.json();
-      if (!res.ok || (json && json.error)) throw new Error((json && json.error) || 'save failed');
+      if(!res.ok || (json && json.error)) throw new Error((json&&json.error)||'save failed');
       setSyncStatus('ok');
-    } catch (e) {
+    }catch(e){
       console.error('儲存失敗', e);
       setSyncStatus('error');
     }
   }
 
-  // 切換到別的日期之前，一定要先把還沒送出的儲存「立刻補送」完成，
-  // 才能保證舊那天的最後一筆修改真的有存到，再去讀新的那天。
+  // ---------- 切換日期前的把關 ----------
+  function canLeaveDay(){
+    if(stalls.length>0 && !isClosed){
+      alert('今天還沒有「關帳」，請先點上方的「今日關帳」才能切換到別天。');
+      return false;
+    }
+    return true;
+  }
   async function switchToDate(newDate){
+    if(!canLeaveDay()) return;
     await flushPendingSave();
     currentDate = newDate;
     loaded = false;
     loadDay(currentDate);
   }
-
   function toggleCloseDay(){
     if(!isClosed){
       const unpaid = stalls.filter(s=>!s.paid).length;
-      if(unpaid > 0){
-        if(!confirm(`今天還有 ${unpaid} 攤尚未收款，確定要關帳嗎？`)) return;
-      } else {
-        if(!confirm('確定要執行今日關帳嗎？')) return;
-      }
+      const msg = unpaid>0
+        ? `今天還有 ${unpaid} 攤尚未收款，確定要關帳嗎？關帳後才能切換到別天。`
+        : '確定要執行今日關帳嗎？關帳後才能切換到別天。';
+      if(!confirm(msg)) return;
       isClosed = true;
-    } else {
-      if(confirm('確定要重新開啟本日記帳嗎？')){
-        isClosed = false;
-      }
+    }else{
+      if(!confirm('確定要重新開啟本日記帳嗎？')) return;
+      isClosed = false;
     }
-    saveDay();
-    render();
+    saveDay(); render();
   }
 
+  // ---------- 攤位資料操作 ----------
   function addStall(){
     const s = {
-      id: uid(),
-      name: '攤位 '+(stalls.length+1),
-      cleaning: DEFAULT_CLEANING,
-      bulbs: [],
-      appliances: [],
-      paid: false,
+      id: uid(), name: '攤位 '+(stalls.length+1), cleaning: DEFAULT_CLEANING,
+      bulbs: [], appliances: [], paid: false,
     };
     stalls.push(s);
     saveDay(); render();
@@ -487,10 +490,7 @@
     try{
       const json = await gasFetch({action:'get', date:prev}, {method:'GET'});
       const prevStalls = Array.isArray(json.stalls) ? json.stalls : [];
-      if(prevStalls.length===0){
-        alert('前一天（'+prev+'）沒有紀錄可複製。');
-        return;
-      }
+      if(prevStalls.length===0){ alert('前一天（'+prev+'）沒有紀錄可複製。'); return; }
       if(stalls.length>0 && !confirm('今天已有紀錄，要在後面加上昨天的攤位名單嗎？')) return;
       const copied = prevStalls.map(s=>({
         id: uid(), name: s.name, cleaning: s.cleaning,
@@ -508,24 +508,22 @@
     const blob = new Blob([JSON.stringify({date:currentDate, stalls, isClosed}, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = '攤位記帳_'+currentDate+'.json';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    a.href = url; a.download = '攤位記帳_'+currentDate+'.json';
+    document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
 
+  // ---------- 設定畫面 ----------
   function renderSetupScreen(){
     app.innerHTML = `
       <div class="setup-wrap">
-        <h2>連接你的 Google 試算表</h2>
-        <p class="sub">資料會存在你自己的 Google 試算表裡。第一次設定完成後，之後不用再輸入。</p>
+        <h2>先連接你的 Google 試算表</h2>
+        <p class="sub">資料會存在你自己的 Google 試算表裡，所有裝置打開都是同一份。第一次設定完成後，之後不用再輸入。</p>
         <label class="setup-label">Google Apps Script 網址</label>
         <input id="setupUrl" class="setup-input" placeholder="https://script.google.com/macros/s/…/exec">
-        <label class="setup-label">金鑰（SECRET）</label>
+        <label class="setup-label">金鑰（部署程式碼裡設定的 SECRET）</label>
         <input id="setupKey" class="setup-input" placeholder="例如：damelillard">
-        <label class="setup-label">試算表網址（選填）</label>
+        <label class="setup-label">試算表網址（選填，方便之後直接打開查看）</label>
         <input id="setupSheet" class="setup-input" placeholder="https://docs.google.com/spreadsheets/…">
         <button class="fab" id="btnSaveSetup" style="position:static;width:100%;margin-top:16px;">儲存並開始使用</button>
       </div>
@@ -534,12 +532,11 @@
       const url = document.getElementById('setupUrl').value.trim();
       const key = document.getElementById('setupKey').value.trim();
       const sheetUrl = document.getElementById('setupSheet').value.trim();
-      if(!url || !key){ alert('請填寫網址和金鑰。'); return; }
+      if(!url || !key){ alert('請至少填寫網址和金鑰。'); return; }
       setConfig(url, key, sheetUrl);
       loadDay(currentDate);
     };
   }
-
   function openSettingsModal(){
     const c = getConfig();
     openModal(`
@@ -562,38 +559,40 @@
       const url = document.getElementById('setupUrl').value.trim();
       const key = document.getElementById('setupKey').value.trim();
       const sheetUrl = document.getElementById('setupSheet').value.trim();
-      if(!url || !key){ alert('請填寫網址和金鑰。'); return; }
+      if(!url || !key){ alert('請至少填寫網址和金鑰。'); return; }
       setConfig(url, key, sheetUrl);
       closeModal();
       loadDay(currentDate);
     };
   }
 
+  // ---------- 總覽畫面 ----------
   function render(){
     if(!isConfigured()){ renderSetupScreen(); return; }
     if(!loaded) return;
     const total = stalls.reduce((a,s)=>a+stallTotal(s),0);
     const paidTotal = stalls.filter(s=>s.paid).reduce((a,s)=>a+stallTotal(s),0);
     const unpaidTotal = total - paidTotal;
+    const locked = stalls.length>0 && !isClosed;
 
     app.innerHTML = `
       <div class="topbar">
         <div class="topbar-row">
           <div>
-            <div class="brand">攤位清潔費・電費收款 ${isClosed ? '<span style="color:var(--stamp-red);font-weight:bold;">[已關帳]</span>' : ''}</div>
+            <div class="brand">攤位清潔費・電費收款 ${isClosed ? '<span style="color:var(--ledger-green);font-weight:bold;">〔已關帳〕</span>' : ''}</div>
             <div class="sync-badge" id="syncBadge"></div>
           </div>
           <div style="display:flex;gap:6px;">
-            <button class="ghost-btn small" id="btnManualSync">🔄 手動同步</button>
             <button class="icon-btn" id="btnSettings">⚙︎</button>
+            <button class="ghost-btn small" id="btnMonthSummary">本月總表</button>
             <button class="ghost-btn" id="btnDaySummary">本日總表</button>
           </div>
         </div>
         <div class="topbar-row" style="margin-top:10px;">
           <div class="date-nav">
-            <button id="btnPrevDay">‹</button>
-            <input type="date" id="dateInput" value="${currentDate}">
-            <button id="btnNextDay">›</button>
+            <button id="btnPrevDay" ${locked?'disabled':''}>‹</button>
+            <input type="date" id="dateInput" value="${currentDate}" ${locked?'disabled':''}>
+            <button id="btnNextDay" ${locked?'disabled':''}>›</button>
           </div>
           <span style="font-size:12.5px;color:var(--ink-soft);">${fmtDate(currentDate)}</span>
         </div>
@@ -607,14 +606,16 @@
       </div>
 
       <div class="toolbar">
-        <button class="ghost-btn small" id="btnCloseDay" style="${isClosed?'':'color:var(--stamp-red);border-color:var(--stamp-red-tint);'}">
+        <button class="ghost-btn small" id="btnCloseDay" style="${isClosed?'color:var(--ledger-green);border-color:var(--ledger-green-tint);':'color:var(--stamp-red);border-color:var(--stamp-red-tint);'}">
           ${isClosed ? '🔓 重新開帳' : '🔒 今日關帳'}
         </button>
-        <div>
+        <div class="group">
           <button class="ghost-btn small" id="btnExport">匯出今日快照</button>
           <button class="ghost-btn small" id="btnCopyPrev">複製前一天名單</button>
         </div>
       </div>
+
+      ${locked ? `<div style="margin:8px 16px 0;font-size:12px;color:var(--stamp-red);">🔒 今天還沒關帳，日期切換已鎖定，先點左邊「今日關帳」才能換別天</div>` : ''}
 
       <main>
         ${stalls.length===0
@@ -642,13 +643,17 @@
   function bindListEvents(){
     document.getElementById('btnPrevDay').onclick = ()=> switchToDate(shiftDate(currentDate,-1));
     document.getElementById('btnNextDay').onclick = ()=> switchToDate(shiftDate(currentDate,1));
-    document.getElementById('dateInput').onchange = (e)=> switchToDate(e.target.value);
+    document.getElementById('dateInput').onchange = (e)=>{
+      const val = e.target.value;
+      if(!canLeaveDay()){ e.target.value = currentDate; return; }
+      switchToDate(val);
+    };
     document.getElementById('btnAddStall').onclick = addStall;
     document.getElementById('btnCopyPrev').onclick = copyFromPreviousDay;
     document.getElementById('btnDaySummary').onclick = openDaySummary;
+    document.getElementById('btnMonthSummary').onclick = openMonthSummary;
     document.getElementById('btnExport').onclick = exportBackup;
     document.getElementById('btnSettings').onclick = openSettingsModal;
-    document.getElementById('btnManualSync').onclick = ()=>{ loadDay(currentDate); };
     document.getElementById('btnCloseDay').onclick = toggleCloseDay;
 
     document.querySelectorAll('[data-action="openStall"]').forEach(el=>{
@@ -659,6 +664,7 @@
     });
   }
 
+  // ---------- Modal：單攤明細編輯 ----------
   function openModal(html){
     modalContent.innerHTML = `<button class="modal-close" data-action="closeModal"></button>` + html;
     modalOverlay.classList.remove('hidden');
@@ -668,7 +674,6 @@
   modalOverlay.addEventListener('click', (e)=>{ if(e.target===modalOverlay) closeModal(); });
 
   function openStallEditor(id){ renderStallEditor(id); }
-
   function renderStallEditor(id){
     const s = stalls.find(x=>x.id===id);
     if(!s) return;
@@ -690,7 +695,7 @@
         ${s.appliances.map((a,i)=>`<span class="chip">${escapeHtml(a.name)} ${money(a.price)}<button class="x" data-action="rmappl" data-idx="${i}">✕</button></span>`).join('')}
       </div>
 
-      <div class="section-label">加燈（可重複點）</div>
+      <div class="section-label">加燈（可重複點，點幾次加幾顆）</div>
       <div class="add-row">
         ${BULB_PRESETS.map(p=>`<button class="preset" data-action="addbulb" data-price="${p.price}">+ ${p.label}</button>`).join('')}
       </div>
@@ -747,6 +752,22 @@
     };
   }
 
+  // ---------- 收據 ----------
+  function stallReceiptText(s){
+    const lines = [];
+    lines.push('收據');
+    lines.push('日期：'+currentDate+'（'+fmtDate(currentDate)+'）');
+    lines.push('攤位：'+s.name);
+    lines.push('--------------------------');
+    lines.push('清潔費：'+money(s.cleaning));
+    s.bulbs.forEach((b,i)=> lines.push('電費（燈 '+(i+1)+'）：'+money(b)));
+    s.appliances.forEach(a=> lines.push(a.name+'：'+money(a.price)));
+    lines.push('--------------------------');
+    lines.push('總計：'+money(stallTotal(s)));
+    lines.push('狀態：'+(s.paid?'已收':'未收'));
+    return lines.join('\n');
+  }
+
   function openStallReceipt(id){
     const s = stalls.find(x=>x.id===id);
     if(!s) return;
@@ -756,7 +777,7 @@
       <h2>${escapeHtml(s.name)} 的收據</h2>
       <div class="sub">${currentDate}（${fmtDate(currentDate)}）</div>
       <div class="receipt-paper">
-        <div class="r-title">收 據</div>
+        <div class="r-title">收　據</div>
         <div class="receipt-row"><span>攤位</span><span>${escapeHtml(s.name)}</span></div>
         <div class="receipt-row"><span>日期</span><span>${currentDate}</span></div>
         <hr>
@@ -777,15 +798,13 @@
     modalContent.querySelector('[data-action="back"]').onclick = ()=> renderStallEditor(id);
     modalContent.querySelector('[data-action="printReceipt"]').onclick = ()=> window.print();
     modalContent.querySelector('[data-action="copyReceipt"]').onclick = async ()=>{
-      const text = `收據\n日期：${currentDate}\n攤位：${s.name}\n總計：${money(stallTotal(s))}\n狀態：${s.paid?'已收':'未收'}`;
+      const text = stallReceiptText(s);
       try{
         await navigator.clipboard.writeText(text);
         alert('已複製收據文字');
       }catch(e){
         const ta = modalContent.querySelector('textarea.copy-fallback');
-        ta.value = text;
-        ta.classList.remove('hidden');
-        ta.select();
+        ta.value = text; ta.classList.remove('hidden'); ta.select();
       }
     };
   }
@@ -802,10 +821,10 @@
       </div>`).join('') || `<div class="empty-state">今天沒有攤位紀錄</div>`;
 
     openModal(`
-      <h2>本日總表 ${isClosed ? '(已關帳)' : ''}</h2>
+      <h2>本日總表 ${isClosed?'〔已關帳〕':''}</h2>
       <div class="sub">${currentDate}（${fmtDate(currentDate)}）・共 ${stalls.length} 攤</div>
       <div class="receipt-paper">
-        <div class="r-title">本 日 總 表</div>
+        <div class="r-title">本　日　總　表</div>
         ${rows}
         <hr>
         <div class="receipt-row"><span>應收合計</span><span>${money(total)}</span></div>
@@ -817,6 +836,51 @@
       </div>
     `);
     modalContent.querySelector('[data-action="printDay"]').onclick = ()=> window.print();
+  }
+
+  // ---------- 本月總表 ----------
+  async function openMonthSummary(){
+    const month = currentDate.slice(0,7); // 'yyyy-MM'
+    openModal(`<h2>本月總表</h2><div class="sub">${month}・讀取中…</div>`);
+    let json;
+    try{
+      json = await gasFetch({action:'getMonth', month}, {method:'GET'});
+    }catch(e){
+      openModal(`<h2>本月總表</h2><div class="sub">讀取失敗，請確認網路連線與雲端設定。</div>`);
+      return;
+    }
+    const days = Array.isArray(json.days) ? json.days : [];
+    let total=0, paidTotal=0, stallCount=0;
+    const rows = days.map(d=>{
+      const dayTotal = d.stalls.reduce((a,s)=>a+stallTotal(s),0);
+      const dayPaid = d.stalls.filter(s=>s.paid).reduce((a,s)=>a+stallTotal(s),0);
+      total += dayTotal; paidTotal += dayPaid; stallCount += d.stalls.length;
+      const dd = d.date.slice(8,10);
+      return `
+      <div class="day-list-row">
+        <span>${dd} 日${d.isClosed?'':'（未關帳）'}・${d.stalls.length}攤</span>
+        <span>${money(dayTotal)}</span>
+        <span class="st ${dayPaid===dayTotal && dayTotal>0 ? 'paid':'unpaid'}">已收${money(dayPaid)}</span>
+      </div>`;
+    }).join('') || `<div class="empty-state">這個月還沒有任何紀錄</div>`;
+    const unpaidTotal = total - paidTotal;
+
+    openModal(`
+      <h2>本月總表</h2>
+      <div class="sub">${month}・共 ${days.length} 個記帳日、${stallCount} 攤次</div>
+      <div class="receipt-paper">
+        <div class="r-title">本　月　總　表</div>
+        ${rows}
+        <hr>
+        <div class="receipt-row"><span>應收合計</span><span>${money(total)}</span></div>
+        <div class="receipt-row"><span>已收合計</span><span>${money(paidTotal)}</span></div>
+        <div class="receipt-row receipt-total"><span>未收合計</span><span>${money(unpaidTotal)}</span></div>
+      </div>
+      <div class="modal-actions">
+        <button class="primary" data-action="printMonth">列印</button>
+      </div>
+    `);
+    modalContent.querySelector('[data-action="printMonth"]').onclick = ()=> window.print();
   }
 
   if(isConfigured()){
